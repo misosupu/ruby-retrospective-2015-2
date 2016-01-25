@@ -1,7 +1,7 @@
 require 'digest'
 require 'pp'
 
-class Transaction
+class Result
   attr_reader :message, :result
 
   def initialize(message, return_code, result = nil)
@@ -44,8 +44,10 @@ class CommitEntry
   def initialize(message, objects)
     @message = message
     @date = Time.now
-    @hash = Digest::SHA1.hexdigest("#{@date}#{@message}")
+    @hash = Digest::SHA1.hexdigest("#{formatted_date}#{@message}")
     @objects = objects
+    # puts "Initializing a commit entry with values message: #{@message},
+    # formatted_date: #{formatted_date}"
   end
 
   def ==(other)
@@ -53,8 +55,14 @@ class CommitEntry
   end
 
   def to_s
-    "Commit #{@hash}\nDate: #{@date.strftime('%a %b %-d %H:%M %Y %z')}\n\n\t" \
+    "Commit #{@hash}\nDate: #{formatted_date}\n\n\t" \
     "#{@message}"
+  end
+
+  private
+
+  def formatted_date
+    @date.strftime('%a %b %d %H:%M %Y %z')
   end
 end
 
@@ -76,12 +84,12 @@ class Branch
 
   def create(branch_name)
     if @object_store.repository.any? { |branch| branch.name == branch_name }
-      Transaction.new("Branch #{branch_name} already exists.", false)
+      Result.new("Branch #{branch_name} already exists.", false)
     else
       @object_store.repository.push(Branch.new(branch_name, @object_store,
                                                items.clone, commits.clone))
-      Transaction.new("Created branch #{branch_name}.", true,
-                      @object_store.repository.last)
+      Result.new("Created branch #{branch_name}.", true,
+                 @object_store.repository.last)
     end
   end
 
@@ -92,24 +100,24 @@ class Branch
   def checkout(branch_name)
     branch_index = get_branch_index(branch_name)
     if branch_index.nil?
-      Transaction.new("Branch #{branch_name} does not exist.", false)
+      Result.new("Branch #{branch_name} does not exist.", false)
     else
       @object_store.current_branch = branch_name
-      Transaction.new("Switched to branch #{branch_name}.", true,
+      Result.new("Switched to branch #{branch_name}.", true,
                       @object_store.repository[branch_index])
     end
   end
 
   def remove(branch_name)
     if @object_store.current_branch == branch_name
-      return Transaction.new('Cannot remove current branch.', false)
+      return Result.new('Cannot remove current branch.', false)
     end
     branch_index = get_branch_index(branch_name)
     if branch_index.nil?
-      Transaction.new("Branch #{branch_name} does not exist.", false)
+      Result.new("Branch #{branch_name} does not exist.", false)
     else
       @object_store.repository.delete_at(branch_index)
-      Transaction.new("Removed branch #{branch_name}.", true)
+      Result.new("Removed branch #{branch_name}.", true)
     end
   end
 
@@ -118,7 +126,7 @@ class Branch
     branch_names.sort!.map! do |name|
       name == @object_store.current_branch ? "* #{name}" : "  #{name}"
     end
-    Transaction.new(branch_names.join('\n'), true)
+    Result.new(branch_names.join("\n"), true)
   end
 end
 
@@ -139,26 +147,26 @@ class ObjectStore
 
   def head
     if branch.commits.empty?
-      Transaction.new("Branch #{branch.name} does not have any commits yet.",
-                      false)
+      Result.new("Branch #{branch.name} does not have any commits yet.", false)
     else
-      Transaction.new("#{branch.commits.first.message}", true,
-                      branch.commits.first)
+      Result.new("#{branch.commits.first.message}", true, branch.commits.first)
     end
   end
 
   def add(name, object)
     branch.remove(name) if branch.staged.include?(CommitObject.new(name))
     branch.staged.push(CommitObject.new(name, object))
-    Transaction.new("Added #{name} to stage.", true, object)
+    Result.new("Added #{name} to stage.", true, object)
   end
 
   def log
     if branch.commits.empty?
       message = "Branch #{@current_branch} does not have any commits yet."
-      Transaction.new(message, false)
+      Result.new(message, false)
     else
-      Transaction.new(branch.commits.join("\n\n"), true, branch.commits)
+      message = branch.commits.map(&:to_s).join("\n\n")
+      # branch.commits.join("\n\n")
+      Result.new(message, true, branch.commits)
     end
   end
 
@@ -167,54 +175,63 @@ class ObjectStore
   # case 2: rolls back to a previous commit,
   # reversing each commit command along the way
   def sweep(object, command = :commit)
-    if (object.for_deletion? and command != :rollback) ||
-       (!object.for_deletion? and command == :rollback)
+    if (object.for_deletion? && command != :rollback) ||
+       (!object.for_deletion? && command == :rollback)
       branch.items.delete(object)
     else
       branch.items.push(object)
     end
   end
 
-  def commit(message)
-    if branch.staged.empty?
-      return Transaction.new('Nothing to commit, working directory clean.',
-                             false)
-    end
+  def cleanup(branch, message)
     # add the staged items to the repository
-    branch.staged.each do |object|
-      sweep(object)
-    end
+    branch.staged.each { |object| sweep(object) }
     branch.commits.insert(0, CommitEntry.new(message, branch.staged.clone))
     length = branch.staged.length
     branch.staged.clear
-    Transaction.new("#{message}\n\t#{length} objects changed", true,
-                    branch.commits.first)
+    length
+  end
+
+  def commit(message)
+    if branch.staged.empty?
+      return Result.new('Nothing to commit, working directory clean.', false)
+    end
+    # # add the staged items to the repository
+    # branch.staged.each { |object| sweep(object) }
+    # branch.commits.insert(0, CommitEntry.new(message, branch.staged.clone))
+    # length = branch.staged.length
+    # branch.staged.clear
+    # removed branch.commits.first:
+    changed = cleanup(branch, message)
+    Result.new("#{message}\n\t#{changed} objects changed", true,
+               head.result)
   end
 
   def remove(name)
     for_deletion = object_exists?(name)
     if for_deletion.equal? nil
-      Transaction.new("Object #{name} is not committed.", false)
+      Result.new("Object #{name} is not committed.", false)
     else
       for_deletion.for_deletion = true
       branch.staged.push(for_deletion)
-      Transaction.new("Added #{name} for removal.", true, for_deletion.object)
+      Result.new("Added #{name} for removal.", true, for_deletion.object)
     end
   end
 
   def checkout(commit_hash)
     commit_index = branch.commits.index { |entry| entry.hash == commit_hash }
     if commit_index.nil?
-      return Transaction.new("Commit #{commit_hash} does not exist.", false)
+      return Result.new("Commit #{commit_hash} does not exist.", false)
     end
     0.upto(commit_index - 1) do |index|
-      branch.commits[index].objects.each do |commit_object|
-        sweep(commit_object, :rollback)
-      end
+      branch.commits[index].objects.map { |entry| sweep(entry, :rollback) }
+      # branch.commits[index].objects.each do |commit_object|
+      #   sweep(commit_object, :rollback)
+      # end
     end
     branch.commits = branch.commits.take(commit_index + 1).reverse
-    Transaction.new("HEAD is now at #{branch.commits.first.hash}.", true,
-                    branch.commits.first)
+    # branch.commits.first.hash
+    Result.new("HEAD is now at #{head.result.hash}.", true, head.result)
   end
 
   def object_exists?(name)
@@ -228,10 +245,35 @@ class ObjectStore
   def get(object_name)
     commit_object = branch.items.find { |item| item.name == object_name }
     if commit_object.nil?
-      Transaction.new("Object #{object_name} is not committed.", false)
+      Result.new("Object #{object_name} is not committed.", false)
     else
-      Transaction.new("Found object #{object_name}.", true,
-                      commit_object.object)
+      Result.new("Found object #{object_name}.", true, commit_object.object)
     end
   end
 end
+
+# repo = ObjectStore.init
+# repo.add("object1", "content1")
+# repo.add("object2", "content2")
+# commit = repo.commit("So cool!").result
+# commit_hash = Digest::SHA1.hexdigest(
+# "#{commit.date.strftime("%a %b %d %H:%M %Y %z")}#{commit.message}")
+# pp commit_hash
+# pp repo.log
+
+# repo = ObjectStore.init
+# repo.add('foo1', :bar1)
+# repo.commit('First commit')
+#
+# repo.add('foo2', :bar2)
+# repo.commit('Second commit')
+#
+# puts repo.log.message
+
+
+repo = ObjectStore.init
+repo.add("object1", "content1")
+first_commit = repo.commit("First commit").result
+pp first_commit
+# pp first_commit.objects
+# expect(first_commit.objects).to match_array(["content1"])
