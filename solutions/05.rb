@@ -46,8 +46,6 @@ class CommitEntry
     @date = Time.now
     @hash = Digest::SHA1.hexdigest("#{formatted_date}#{@message}")
     @objects = objects
-    # puts "Initializing a commit entry with values message: #{@message},
-    # formatted_date: #{formatted_date}"
   end
 
   def ==(other)
@@ -149,7 +147,10 @@ class ObjectStore
     if branch.commits.empty?
       Result.new("Branch #{branch.name} does not have any commits yet.", false)
     else
-      Result.new("#{branch.commits.first.message}", true, branch.commits.first)
+      commit = branch.commits.first.dup
+      commit.objects.map!(&:object)
+      Result.new("#{branch.commits.first.message}", true,
+                 commit)
     end
   end
 
@@ -187,24 +188,17 @@ class ObjectStore
     # add the staged items to the repository
     branch.staged.each { |object| sweep(object) }
     branch.commits.insert(0, CommitEntry.new(message, branch.staged.clone))
-    length = branch.staged.length
     branch.staged.clear
-    length
   end
 
   def commit(message)
     if branch.staged.empty?
       return Result.new('Nothing to commit, working directory clean.', false)
     end
-    # # add the staged items to the repository
-    # branch.staged.each { |object| sweep(object) }
-    # branch.commits.insert(0, CommitEntry.new(message, branch.staged.clone))
-    # length = branch.staged.length
-    # branch.staged.clear
-    # removed branch.commits.first:
-    changed = cleanup(branch, message)
-    Result.new("#{message}\n\t#{changed} objects changed", true,
-               head.result)
+    modified = branch.staged.map(&:object)
+    cleanup(branch, message)
+    Result.new("#{message}\n\t#{modified.length} objects changed", true,
+               modified)
   end
 
   def remove(name)
@@ -252,6 +246,13 @@ class ObjectStore
   end
 end
 
+repo = ObjectStore.init
+repo.add("object1", "content1")
+repo.add("object2", "content2")
+pp repo.commit("So cool!")
+#).to be_success("So cool!\n\t2 objects changed", repo.head.result)
+pp repo.head.result
+
 # repo = ObjectStore.init
 # repo.add("object1", "content1")
 # repo.add("object2", "content2")
@@ -270,10 +271,10 @@ end
 #
 # puts repo.log.message
 
-
-repo = ObjectStore.init
-repo.add("object1", "content1")
-first_commit = repo.commit("First commit").result
-pp first_commit
+#
+# repo = ObjectStore.init
+# repo.add("object1", "content1")
+# first_commit = repo.commit("First commit").result
+# pp first_commit
 # pp first_commit.objects
 # expect(first_commit.objects).to match_array(["content1"])
