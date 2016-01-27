@@ -1,6 +1,28 @@
 require 'ostruct'
 
 module Validate
+  class Error < Exception
+    def initialize(message)
+      @message = message
+    end
+
+    def to_s
+      @message
+    end
+
+    def self.argument_mismatch_strict(function)
+      "Wrong number of arguments for '#{function.name}': " \
+      "expected #{Validate::ARITHMETIC_FUNCTIONS[function.name][0]}, " \
+      "got #{function.parameters.length}"
+    end
+
+    def self.argument_mismatch_loose(function)
+      "Wrong number of arguments for '#{function.name}': expected at least " \
+      "#{Validate::ARITHMETIC_FUNCTIONS[function.name][0]}, " \
+      "got #{function.parameters.length}"
+    end
+  end
+
   ARITHMETIC_FUNCTIONS = { ADD: [2, Float::INFINITY, :+],
                            MULTIPLY: [2, Float::INFINITY, :*],
                            SUBTRACT: [2, 2, :-],
@@ -9,7 +31,7 @@ module Validate
 
   def validate_index(index)
     if (index =~ /^[A-Z]+\d+$/).nil?
-      raise self.class::Error.new("Invalid cell index #{index}")
+      raise Error.new("Invalid cell index #{index}")
     else
       return true
     end
@@ -18,7 +40,7 @@ module Validate
   def validate_function_exists(function, valid_functions)
     # check if function name exists
     unless valid_functions.include?(function.name)
-      raise self.class::Error.new("Unknown function '#{function.name}'")
+      raise Error.new("Unknown function '#{function.name}'")
     end
   end
 
@@ -29,13 +51,16 @@ module Validate
   end
 
   def validate_function_parameters(function)
-    error_class = self.class::Error
     if ARITHMETIC_FUNCTIONS[function.name][1] != Float::INFINITY &&
-       function.parameters.length != ARITHMETIC_FUNCTIONS[function.name][0]
-      raise error_class.new(error_class.argument_mismatch_strict(function))
+        function.parameters.length != ARITHMETIC_FUNCTIONS[function.name][0]
+      raise Error.new(Error.argument_mismatch_strict(function))
     elsif function.parameters.length < ARITHMETIC_FUNCTIONS[function.name][0]
-      raise error_class.new(error_class.argument_mismatch_loose(function))
+      raise Error.new(Error.argument_mismatch_loose(function))
     end
+  end
+
+  def validate_function_syntax(function, match)
+    raise Error, ("Invalid expression '#{function[1..-1]}'") if match.nil?
   end
 end
 
@@ -71,9 +96,8 @@ module Parser
   end
 
   def evaluate_function(function)
-    match = /^=([A-Z]+)\((.+)\)$/.match(function)
-    # check if function is syntactically correct
-    raise self.class::Error, ("Invalid expression '#{function}'") if match.nil?
+    match = /^=([A-Z]+)\((.*)\)$/.match(function)
+    validate_function_syntax(function, match)
     parameters = match[2].split(',').map(&:strip)
     function = OpenStruct.new(name: match[1].to_sym, parameters: parameters)
     validate_function(function)
@@ -91,8 +115,8 @@ class Spreadsheet
   include Validate, Parser
 
   def initialize(sheet = '')
-      @sheet = []
-      parse_sheet(sheet)
+    @sheet = []
+    parse_sheet(sheet)
   end
 
   def empty?
@@ -106,7 +130,7 @@ class Spreadsheet
     if cell_index.first >= @sheet.size || cell_index.last >= @sheet[0].size
       raise Error.new("Cell '#{cell_at}' does not exist")
     else
-      return @sheet[cell_index.first][cell_index.last]
+      @sheet[cell_index.first][cell_index.last]
     end
   end
 
@@ -136,31 +160,9 @@ class Spreadsheet
 
   def evaluate_expression(expression)
     case expression
-    when /^=[\d\.]+$/ then return expression[1..-1]
-    when /^=[A-Z]+\d+$/ then return evaluate_cell(expression[1..-1])
-    else return evaluate_function(expression)
-    end
-  end
-
-  class Error < Exception
-    def initialize(message)
-      @message = message
-    end
-
-    def to_s
-      @message
-    end
-
-    def self.argument_mismatch_strict(function)
-      "Wrong number of arguments for '#{function.name}': " \
-      "expected #{Validate::ARITHMETIC_FUNCTIONS[function.name][0]}, " \
-      "got #{function.parameters.length}"
-    end
-
-    def self.argument_mismatch_loose(function)
-      "Wrong number of arguments for '#{function.name}': expected at least " \
-      "#{Validate::ARITHMETIC_FUNCTIONS[function.name][0]}, " \
-      "got #{function.parameters.length}"
+      when /^=[\d\.]+$/ then return expression[1..-1]
+      when /^=[A-Z]+\d+$/ then return evaluate_cell(expression[1..-1])
+      else return evaluate_function(expression)
     end
   end
 end
