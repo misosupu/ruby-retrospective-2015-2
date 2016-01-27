@@ -13,6 +13,7 @@ module DateArithmetic
 
   def check_periodicity(date, agenda, option)
     return false if agenda < date
+    # return false if date < agenda
     case detect_periodicity_type(option)
     when :year then return (date - agenda) % (option[0].to_i * 360) == 0
     when :month then return (date - agenda) % (option[0].to_i * 30) == 0
@@ -46,7 +47,7 @@ module LazyMode
     file
   end
 
-
+  # Helper class facilitating date formatting
   class DateHelper
     def self.pad_date_initialize(index, date)
       if index == 0
@@ -61,6 +62,7 @@ module LazyMode
       date_element.prepend('0' * (pad_size - date_element.length))
     end
   end
+
   # Defines a date in the form 'yyyy-mm-dd'
   class Date
     attr_reader :option
@@ -141,18 +143,6 @@ module LazyMode
       add_sub_note(note)
     end
 
-    # def method_missing(name, argument = nil)
-    #   # puts "Inside method_missing, name = #{name}"
-    #   if [:status, :body].include?(name) && !argument.nil?
-    #     instance_variable_set("@#{name}", argument)
-    #   elsif name == :body && argument.nil?
-    #     instance_variable_set("@#{name}", '')
-    #   elsif name == :status && argument.nil?
-    #     instance_variable_set("@#{name}", :postponed)
-    #   end
-    #   instance_variable_get("@#{name}")
-    # end
-
     def scheduled(date)
       if date.count('+') > 0
         @schedule = date.split('+')
@@ -166,12 +156,36 @@ module LazyMode
   # Defines a note container
   class NoteContainer
     attr_reader :notes
-    def initialize
-      @notes = []
+    def initialize(notes = [])
+      @notes = notes
     end
 
     def add(note)
       @notes << note
+    end
+
+    def where(options)
+      filtered = @notes.dup
+      filter_by_tag(filtered, options[:tag]) if options.has_key?(:tag)
+      filter_by_status(filtered, options[:status]) if options.has_key?(:status)
+      filter_by_text(filtered, options[:text]) if options.has_key?(:text)
+      NoteContainer.new(filtered)
+    end
+
+    private
+
+    def filter_by_tag(notes, tag)
+      notes.select! { |note| note.tags.include?(tag) }
+    end
+
+    def filter_by_status(notes, status)
+      notes.select! { |note| note.status == status }
+    end
+
+    def filter_by_text(notes, pattern)
+      notes.select! do |note|
+        note.header =~ pattern || note.body =~ pattern
+      end
     end
   end
 
@@ -200,6 +214,8 @@ module LazyMode
       container
     end
 
+    private
+
     def add_to_agenda(container, date)
       agenda(date).each { |n| container.add n }
     end
@@ -217,11 +233,9 @@ module LazyMode
          (!note.schedule.last.nil? && \
          check_periodicity(note.schedule.first, date, note.schedule.last))
         note.date = date
-        agenda_notes << note
+        agenda_notes << note.clone
       end
     end
-
-    private
 
     def add_note(note)
       @notes << note
@@ -239,46 +253,3 @@ module LazyMode
     end
   end
 end
-
-file = LazyMode.create_file('file') do
-  note 'simple note' do
-    scheduled '2012-12-11 +1d'
-  end
-
-  note 'simple note 2' do
-    scheduled '2012-12-15'
-  end
-end
-
-pp file
-puts
-puts
-agenda = file.weekly_agenda(LazyMode::Date.new('2012-12-06'))
-pp agenda
-
-# file = LazyMode.create_file('not_important') do
-#   note 'not_important' do
-#     status :postponed
-#   end
-# end
-# pp file
-# p file.notes.first.status
-
-# file = LazyMode.create_file('not_important') do
-#   note 'not_important' do
-#     note 'one' do
-#       # not important
-#     end
-#
-#     note 'two' do
-#       # not important
-#     end
-#
-#     note 'three' do
-#       # not important
-#     end
-#   end
-# end
-#
-# p file.notes.first.body
-# puts file.notes.first.body.class
