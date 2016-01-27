@@ -40,6 +40,9 @@ module Validate
 end
 
 module Parser
+  ALPHABET_SIZE   = 'Z'.ord - 'A'.ord + 1
+  ALPHABET_OFFSET = 'A'.ord - 1
+
   def parse_number(number)
     number == number.floor ? number.to_i.to_s : '%.2f' % number
   end
@@ -54,14 +57,17 @@ module Parser
     @sheet
   end
 
+  def letter_index_to_number(letter_index)
+    letter_index.chars.reverse.map.with_index do |char, position|
+      (char.ord - ALPHABET_OFFSET) * ALPHABET_SIZE**position
+    end.reduce(:+)
+  end
+
   def convert_index(cell_index)
     indexes = cell_index.scan(/[A-Z]+|\d+/)
-    row = 0
-    indexes[0].chars.each_with_index do |element, index|
-      row += (element.ord - 64) * (26**(indexes[0].length - index - 1)) - 1
-    end
-    indexes[1], indexes[0] = row, indexes.last.to_i - 1
-    indexes
+    indexes[0] = letter_index_to_number(indexes[0]) - 1
+    indexes[1] = indexes.last.to_i - 1
+    indexes.reverse
   end
 
   def evaluate_function(function)
@@ -76,7 +82,7 @@ module Parser
 
   def parse_row(row)
     row.map do |cell|
-      cell.count("=") != 0 ? evaluate_expression(cell) : cell
+      cell.count('=') != 0 ? evaluate_expression(cell) : cell
     end.join("\t")
   end
 end
@@ -84,13 +90,9 @@ end
 class Spreadsheet
   include Validate, Parser
 
-  def initialize(sheet)
-    if sheet.nil?
-      @sheet = []
-    else
+  def initialize(sheet = '')
       @sheet = []
       parse_sheet(sheet)
-    end
   end
 
   def empty?
@@ -101,7 +103,7 @@ class Spreadsheet
     validate_index(cell_index)
     cell_at = cell_index
     cell_index = convert_index(cell_index)
-    if cell_index.first >= @sheet[0].size || cell_index.last >= @sheet.size
+    if cell_index.first >= @sheet.size || cell_index.last >= @sheet[0].size
       raise Error.new("Cell '#{cell_at}' does not exist")
     else
       return @sheet[cell_index.first][cell_index.last]
