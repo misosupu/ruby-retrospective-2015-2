@@ -1,3 +1,5 @@
+require 'pp'
+
 # Defines helper functions to detect if a date meets a periodicity condition
 module DateArithmetic
   def detect_periodicity_type(periodicity)
@@ -104,7 +106,7 @@ module LazyMode
 
   # Defines a "ToDo List" note
   class Note
-    attr_reader :header, :tags, :schedule, :sub_notes
+    attr_reader :header, :tags, :schedule, :sub_notes, :body, :status
     attr_accessor :file_name, :date
 
     def initialize(header, *tags)
@@ -112,6 +114,19 @@ module LazyMode
       @tags = *tags
       @sub_notes = []
       @status = :topostpone
+      @body = ''
+    end
+
+    def body(body = nil)
+      # puts "Body called with argument: #{body}"
+      return @body if body.nil?
+      @body = body
+    end
+
+    def status(status = nil)
+      # puts "Status called with argument: #{status}"
+      return @status if status.nil?
+      @status = status
     end
 
     private
@@ -126,14 +141,17 @@ module LazyMode
       add_sub_note(note)
     end
 
-    def method_missing(name, argument = nil)
-      # puts "Inside method_missing, name = #{name}"
-      if [:status, :body].include?(name) && !argument.nil?
-        instance_variable_set("@#{name}", argument)
-      elsif [:status, :body].include?(name) && argument.nil?
-      end
-      instance_variable_get("@#{name}")
-    end
+    # def method_missing(name, argument = nil)
+    #   # puts "Inside method_missing, name = #{name}"
+    #   if [:status, :body].include?(name) && !argument.nil?
+    #     instance_variable_set("@#{name}", argument)
+    #   elsif name == :body && argument.nil?
+    #     instance_variable_set("@#{name}", '')
+    #   elsif name == :status && argument.nil?
+    #     instance_variable_set("@#{name}", :postponed)
+    #   end
+    #   instance_variable_get("@#{name}")
+    # end
 
     def scheduled(date)
       if date.count('+') > 0
@@ -215,7 +233,52 @@ module LazyMode
       note = Note.new(header, *tags)
       note.instance_eval(&block)
       note.file_name = @name
+      # note.body = '' if note.body.nil?
+      # note.status = :topostpone if note.status.nil?
       add_note(note)
     end
   end
 end
+
+file = LazyMode.create_file('file') do
+  note 'simple note' do
+    scheduled '2012-12-11 +1d'
+  end
+
+  note 'simple note 2' do
+    scheduled '2012-12-15'
+  end
+end
+
+pp file
+puts
+puts
+agenda = file.weekly_agenda(LazyMode::Date.new('2012-12-06'))
+pp agenda
+
+# file = LazyMode.create_file('not_important') do
+#   note 'not_important' do
+#     status :postponed
+#   end
+# end
+# pp file
+# p file.notes.first.status
+
+# file = LazyMode.create_file('not_important') do
+#   note 'not_important' do
+#     note 'one' do
+#       # not important
+#     end
+#
+#     note 'two' do
+#       # not important
+#     end
+#
+#     note 'three' do
+#       # not important
+#     end
+#   end
+# end
+#
+# p file.notes.first.body
+# puts file.notes.first.body.class
